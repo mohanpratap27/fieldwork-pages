@@ -65,3 +65,47 @@ $('#reset-lab').addEventListener('click',()=>{state=initial();save();const url=n
 window.addEventListener('popstate',detail);
 window.addEventListener('storage',event=>{if(event.key===KEY){state=load();refresh();}});
 refresh();
+
+// User-supplied markup is executed only in an opaque-origin iframe sandbox.
+let xssFrame = null;
+const xssExamples = {
+ html: '<b>daypack</b>',
+ alert: '<svg onload="alert(\'XSS works\')"></svg>',
+ iframe: '<iframe src="about:blank" onload="alert(document.cookie)"></iframe>'
+};
+function escapeHTML(value) {
+ return value.replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+}
+function runSearchLab() {
+ const query = $('#xss-input').value;
+ if (!query.trim()) { $('#xss-log').textContent = 'Enter a search query or choose an example first.'; return; }
+ const fixed = $('#xss-fixed').checked;
+ const policy = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; frame-src about:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
+ const bootstrap = `Object.defineProperty(document, 'cookie', {get: () => 'ctf_demo=practice_only', set: () => {}, configurable: false});
+ window.alert = value => parent.postMessage({type: 'fieldwork-xss-demo', message: String(value).slice(0, 500)}, '*');
+ window.addEventListener('error', event => parent.postMessage({type: 'fieldwork-xss-demo', message: 'Script error: ' + event.message}, '*'));`;
+ xssFrame = document.createElement('iframe');
+ xssFrame.title = 'Isolated XSS search results';
+ xssFrame.setAttribute('sandbox', 'allow-scripts');
+ xssFrame.referrerPolicy = 'no-referrer';
+ xssFrame.srcdoc = '<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="' + policy + '"><style>body{font:14px/1.7 system-ui;color:#243d2a;padding:18px;margin:0;overflow-wrap:anywhere}h3{font-size:15px;margin:0 0 12px}iframe{max-width:100%;height:80px;border:1px solid #d6dacd}</style><script>' + bootstrap + '</scr' + 'ipt></head><body><h3>Search results for:</h3><div>' + (fixed ? escapeHTML(query) : query) + '</div></body></html>';
+ $('#xss-log').textContent = fixed ? 'Protected mode: query escaped. Markup displays as plain text.' : 'Vulnerable mode: query rendered as HTML. Waiting for script execution…';
+ $('#xss-preview').replaceChildren(xssFrame);
+}
+$('#xss-search').addEventListener('submit', event => { event.preventDefault(); runSearchLab(); });
+$('#xss-fixed').addEventListener('change', () => { if ($('#xss-input').value.trim()) runSearchLab(); });
+for (const name of ['html','alert','iframe']) {
+ $('#example-' + name).addEventListener('click', () => { $('#xss-input').value = xssExamples[name]; runSearchLab(); });
+}
+$('#xss-clear').addEventListener('click', () => {
+ xssFrame = null;
+ $('#xss-input').value = '';
+ $('#xss-fixed').checked = false;
+ const empty = document.createElement('p'); empty.className = 'lab-empty'; empty.textContent = 'Your search results will appear here.';
+ $('#xss-preview').replaceChildren(empty);
+ $('#xss-log').textContent = 'Ready. Choose an example or enter your own query.';
+});
+window.addEventListener('message', event => {
+ if (!xssFrame || event.source !== xssFrame.contentWindow || event.data?.type !== 'fieldwork-xss-demo' || typeof event.data.message !== 'string') return;
+ $('#xss-log').textContent += '\nScript executed → alert: ' + event.data.message.slice(0, 500);
+});
